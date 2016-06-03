@@ -72,9 +72,10 @@ void CuDNNConvolutionLayer<Dtype>::LayerSetUp(
   }
 
   handles_setup_ = true;
-  forward_iter_ = 0;
   // When true, Reshape asks cuDNN for the best algorithm
-  use_algo_seeker_ = true;
+  use_algo_seeker_      = true;
+  // When true, a small amount of workspace is allowed for algorithms
+  use_modest_workspace_ = true;
 }
 
 // TODO: Set algorithms again in case parameters (blob shapes) change.
@@ -123,7 +124,7 @@ void CuDNNConvolutionLayer<Dtype>::Reshape(
     // Get: workspace_bytes is only used as a workspace limit by Get.
     //      (no allocation happens before Get or by Get).
     size_t workspace_bytes;
-    if (forward_iter_ == 0) {
+    if (use_modest_workspace_) {
       // In iteration 0, use a small amount of memory in order to leave
       // most of memory for allocating layer blobs.
       workspace_bytes = 8*1024*1024;

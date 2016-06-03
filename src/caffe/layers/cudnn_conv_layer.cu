@@ -65,7 +65,8 @@ void CuDNNConvolutionLayer<Dtype>::Forward_gpu(
     // NOLINT_NEXT_LINE(whitespace/operators)
     CUDA_CHECK(cudaStreamSynchronize(cudaStreamLegacy));
   }
-  ++forward_iter_;
+  // Possibly use faster algorithms by allowing larger workspace.
+  use_modest_workspace_ = false;
 }
 
 template<typename Dtype>
