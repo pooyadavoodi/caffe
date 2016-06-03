@@ -67,6 +67,7 @@ class CuDNNConvolutionLayer : public ConvolutionLayer<Dtype> {
   size_t *workspace_bwd_filter_sizes_;
   GPUMemoryManager::Buffer workspace;
   int forward_iter_;
+
  private:
   bool use_algo_seeker_;
   void FindExConvAlgo(const vector<Blob<Dtype>*>& bottom,

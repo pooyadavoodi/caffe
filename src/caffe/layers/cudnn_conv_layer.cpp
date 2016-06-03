@@ -28,8 +28,9 @@ void CuDNNConvolutionLayer<Dtype>::LayerSetUp(
   workspace_bwd_filter_sizes_ = new size_t[bottom.size()];
   workspace_bwd_data_sizes_ = new size_t[bottom.size()];
 
-  //Initializing algorithms and workspaces
-  //Do not rely on initialized algorithms (Reshape will set algorithms with correct values in the first iteration)
+  // Initializing algorithms and workspaces
+  // Do not rely on initialized algorithms (Reshape will set algorithms
+  // with correct values in the first iteration)
   for (size_t i = 0; i < bottom.size(); ++i) {
     fwd_algo_[i] = (cudnnConvolutionFwdAlgo_t)0;
     bwd_filter_algo_[i] = (cudnnConvolutionBwdFilterAlgo_t)0;
@@ -72,11 +73,11 @@ void CuDNNConvolutionLayer<Dtype>::LayerSetUp(
 
   handles_setup_ = true;
   forward_iter_ = 0;
-  //When true, Reshape asks cuDNN for the best algorithm
+  // When true, Reshape asks cuDNN for the best algorithm
   use_algo_seeker_ = true;
 }
 
-//TODO: Set algorithms again in case parameters (blob shapes) change.
+// TODO: Set algorithms again in case parameters (blob shapes) change.
 template <typename Dtype>
 void CuDNNConvolutionLayer<Dtype>::Reshape(
     const vector<Blob<Dtype>*>& bottom, const vector<Blob<Dtype>*>& top) {
@@ -98,7 +99,7 @@ void CuDNNConvolutionLayer<Dtype>::Reshape(
   const int stride_h = stride_data[0];
   const int stride_w = stride_data[1];
 
-  //Set cuDNN tensor and convolution descriptors
+  // Set cuDNN tensor and convolution descriptors
   for (int i = 0; i < bottom.size(); i++) {
     cudnn::setTensor4dDesc<Dtype>(&bottom_descs_[i],
         this->num_,
@@ -114,25 +115,31 @@ void CuDNNConvolutionLayer<Dtype>::Reshape(
         filter_desc_, pad_h, pad_w, stride_h, stride_w);
   }
 
-  //Ask cuDNN to find the best algorithm
-  if(use_algo_seeker_) {
+  // Ask cuDNN to find the best algorithm
+  if (use_algo_seeker_) {
     size_t workspace_limit_bytes, total_memory;
     GPUMemoryManager::GetInfo(&workspace_limit_bytes, &total_memory);
-    //FindEx: A workspace of size workspace_bytes is allocated and given to FindEx
-    //Get: workspace_bytes is only used as a workspace limit by Get (no allocation happens before Get or by Get)
+    // FindEx: A workspace of size workspace_bytes is allocated for FindEx.
+    // Get: workspace_bytes is only used as a workspace limit by Get.
+    //      (no allocation happens before Get or by Get).
     size_t workspace_bytes;
-    if(forward_iter_ == 0) {
-      //In iteration 0, use a small amount of memory in order to leave most of memory for allocating layer blobs
+    if (forward_iter_ == 0) {
+      // In iteration 0, use a small amount of memory in order to leave
+      // most of memory for allocating layer blobs.
       workspace_bytes = 8*1024*1024;
-    }
-    else {
-      //Use 90% of available memory. Using all of memory may result in failure of workspace.reserve
-      //TODO: Since 90% of memory might be too large, we can allocate exactly how much FindEx needs by taking the maximum workspace among all algorithms (requires an initial call to FindEx with workspace size 0)
+    } else {
+      // Use 90% of available memory.
+      // Using all of memory may result in failure of workspace.reserve.
+      // TODO: Since 90% of memory might be too large, we can allocate
+      //       exactly how much FindEx needs by taking the maximum
+      //       workspace among all algorithms (requires an initial call
+      //       to FindEx with workspace size 0).
       workspace_bytes = workspace_limit_bytes * 0.9;
-      //Avoid seeking for an algorithm in subsequent iterations
+      // Avoid seeking for an algorithm in subsequent iterations
       use_algo_seeker_ = false;
     }
-    switch(this->layer_param_.convolution_param().cudnn_convolution_algo_seeker()) {
+    switch (this->layer_param_.convolution_param().
+            cudnn_convolution_algo_seeker()) {
       case ConvolutionParameter_CuDNNConvolutionAlgorithmSeeker_Get:
         this->GetConvAlgo(bottom, top, workspace_bytes);
         break;
@@ -145,21 +152,26 @@ void CuDNNConvolutionLayer<Dtype>::Reshape(
     }
   }
 
-  //At this point, the algorithms and their workspace are set
-  //Still need to query cuDNN for workspace size to check whether the selected algorithms are valid because:
-    //1) FindEx may return success while giving no valid algorithm as there may be no algorithm available for given parameters
-    //2) Algorithms are set in the first 2 iterations, and if parameters change afterwards, validity of selected algorithms should be checked (TODO: Ideally, we should ask cuDNN again for best algorithm if shape of blobs change)
+  // At this point, the algorithms and their workspace are set.
+  // Still need to query cuDNN for workspace size to check whether the
+  // selected algorithms are valid because:
+  // 1) FindEx may return success while giving no valid algorithm as there
+  //    may be no algorithm available for given parameters.
+  // 2) Algorithms are set in the first 2 iterations, and if parameters
+  //    change afterwards, validity of selected algorithms should be checked
+  //    (TODO: Ideally, we should ask cuDNN again for best algorithm if
+  //     shape of blobs change).
   for (int i = 0; i < bottom.size(); i++) {
-    // forward algorithm 
+    // forward algorithm
     CUDNN_CHECK(cudnnGetConvolutionForwardWorkspaceSize(Caffe::cudnn_handle(),
         bottom_descs_[i], filter_desc_, conv_descs_[i], top_descs_[i],
         fwd_algo_[i], &(workspace_fwd_sizes_[i])));
-    // backward filter algorithm 
+    // backward filter algorithm
     CUDNN_CHECK(cudnnGetConvolutionBackwardFilterWorkspaceSize(
         Caffe::cudnn_handle(),
         bottom_descs_[i], top_descs_[i], conv_descs_[i], filter_desc_,
         bwd_filter_algo_[i], &workspace_bwd_filter_sizes_[i]));
-    // backward data algorithm 
+    // backward data algorithm
     CUDNN_CHECK(cudnnGetConvolutionBackwardDataWorkspaceSize(
         Caffe::cudnn_handle(),
         filter_desc_, top_descs_[i], conv_descs_[i], bottom_descs_[i],
@@ -206,88 +218,96 @@ void CuDNNConvolutionLayer<Dtype>::FindExConvAlgo(
     const vector<Blob<Dtype>*>& top,
     const size_t workspace_bytes) {
 
-  //Number of algorithms we want to consider
-  //Since we only consider one algorithm (the fastest), set this to 1
-  int request_algo_count = 1;
-  int fwd_algo_count, filter_algo_count, data_algo_count;
+  // Number of algorithms we want to consider
+  // Since we only consider one algorithm (the fastest), set this to 1
+  const int kRequestAlgoCount = 1;
+  int fwd_algo_count;
+  int filter_algo_count;
+  int data_algo_count;
 
-  cudnnConvolutionFwdAlgoPerf_t *fwd_results = 
-    new cudnnConvolutionFwdAlgoPerf_t[request_algo_count];
-  cudnnConvolutionBwdFilterAlgoPerf_t *bwd_filter_results = 
-    new cudnnConvolutionBwdFilterAlgoPerf_t[request_algo_count];
-  cudnnConvolutionBwdDataAlgoPerf_t *bwd_data_results = 
-    new cudnnConvolutionBwdDataAlgoPerf_t[request_algo_count];
+  cudnnConvolutionFwdAlgoPerf_t       fwd_results[kRequestAlgoCount];
+  cudnnConvolutionBwdFilterAlgoPerf_t bwd_filter_results[kRequestAlgoCount];
+  cudnnConvolutionBwdDataAlgoPerf_t   bwd_data_results[kRequestAlgoCount];
 
-  //Allocate a temporary buffer for output of cudnnFindConvolutionBackwardFilterAlgorithmEx in order to avoid contaminating this->blobs_[0]
-  Dtype *tmp_weights;
-  GPUMemoryManager::allocate((void**)&tmp_weights, sizeof(Dtype)*this->weight_offset_);
+  // Allocate temporary buffers for input/output of findEx.
+  void *tmp_bottom;
+  void *tmp_top;
+  void *tmp_weights;
+  const int tmp_bottom_size = sizeof(Dtype) * bottom_offset_;
+  const int tmp_top_size    = sizeof(Dtype) * top_offset_;
+  const int tmp_weight_size = sizeof(Dtype) * weight_offset_;
+  GPUMemoryManager::allocate(&tmp_bottom, tmp_bottom_size);
+  GPUMemoryManager::allocate(&tmp_top, tmp_top_size);
+  GPUMemoryManager::allocate(&tmp_weights, tmp_weight_size);
 
-  //workspace_bytes is the amount of available memory before allocating tmp_weights. So, size of weights should be subtracted from workspace_bytes to represent the correct amount of available memory.
-  if(!workspace.try_reserve(workspace_bytes - sizeof(Dtype)*this->weight_offset_)) {
-    workspace.reserve(workspace_bytes - sizeof(Dtype)*this->weight_offset_);
+  // workspace_bytes is the amount of available memory before allocating
+  // temporary buffers. So, size of buffers should be subtracted from
+  // workspace_bytes to represent the correct amount of available memory.
+  const int tmp_total_size = tmp_bottom_size + tmp_top_size + tmp_weight_size;
+  if (!workspace.try_reserve(workspace_bytes - tmp_total_size)) {
+    workspace.reserve(workspace_bytes - tmp_total_size);
   }
 
   for (int i = 0; i < bottom.size(); i++) {
-    //Find forward algorithm
-    CUDNN_CHECK(cudnnFindConvolutionForwardAlgorithmEx(Caffe::cudnn_handle(),
-                                                       bottom_descs_[i],
-                                                       bottom[i]->gpu_data(),
-                                                       filter_desc_,
-                                                       this->blobs_[0]->gpu_data(),
-                                                       conv_descs_[i],
-                                                       top_descs_[i],
-                                                       top[i]->mutable_gpu_data(),
-                                                       request_algo_count,
-                                                       &fwd_algo_count,
-                                                       fwd_results,
-                                                       workspace.data(),
-                                                       workspace_bytes));
+    // Find forward algorithm
+    CUDNN_CHECK(cudnnFindConvolutionForwardAlgorithmEx(
+                  Caffe::cudnn_handle(),
+                  bottom_descs_[i],
+                  tmp_bottom,
+                  filter_desc_,
+                  tmp_weights,
+                  conv_descs_[i],
+                  top_descs_[i],
+                  tmp_top,
+                  kRequestAlgoCount,
+                  &fwd_algo_count,
+                  fwd_results,
+                  workspace.data(),
+                  workspace_bytes));
     fwd_algo_[i] = fwd_results[0].algo;
     workspace_fwd_sizes_[i] = fwd_results[0].memory;
 
-    //Find backward filter algorithm
+    // Find backward filter algorithm
     CUDNN_CHECK(cudnnFindConvolutionBackwardFilterAlgorithmEx(
-                                                   Caffe::cudnn_handle(),
-                                                   bottom_descs_[i],
-                                                   bottom[i]->gpu_data(),
-                                                   top_descs_[i],
-                                                   top[i]->gpu_diff(),
-                                                   conv_descs_[i],
-                                                   filter_desc_,
-                                                   tmp_weights,
-                                                   request_algo_count,
-                                                   &filter_algo_count,
-                                                   bwd_filter_results,
-                                                   workspace.data(),
-                                                   workspace_bytes));
+                  Caffe::cudnn_handle(),
+                  bottom_descs_[i],
+                  tmp_bottom,
+                  top_descs_[i],
+                  tmp_top,
+                  conv_descs_[i],
+                  filter_desc_,
+                  tmp_weights,
+                  kRequestAlgoCount,
+                  &filter_algo_count,
+                  bwd_filter_results,
+                  workspace.data(),
+                  workspace_bytes));
     bwd_filter_algo_[i] = bwd_filter_results[0].algo;
     workspace_bwd_filter_sizes_[i] = bwd_filter_results[0].memory;
 
-    //Find backward data algorithm
+    // Find backward data algorithm
     CUDNN_CHECK(cudnnFindConvolutionBackwardDataAlgorithmEx(
-                                                    Caffe::cudnn_handle(),
-                                                    filter_desc_,
-                                                    this->blobs_[0]->gpu_data(),
-                                                    top_descs_[i],
-                                                    top[i]->gpu_diff(),
-                                                    conv_descs_[i],
-                                                    bottom_descs_[i],
-                                                    bottom[i]->mutable_gpu_diff(),
-                                                    request_algo_count,
-                                                    &data_algo_count,
-                                                    bwd_data_results,
-                                                    workspace.data(),
-                                                    workspace_bytes));
+                  Caffe::cudnn_handle(),
+                  filter_desc_,
+                  tmp_weights,
+                  top_descs_[i],
+                  tmp_top,
+                  conv_descs_[i],
+                  bottom_descs_[i],
+                  tmp_bottom,
+                  kRequestAlgoCount,
+                  &data_algo_count,
+                  bwd_data_results,
+                  workspace.data(),
+                  workspace_bytes));
 
     bwd_data_algo_[i] = bwd_data_results[0].algo;
     workspace_bwd_data_sizes_[i] = bwd_data_results[0].memory;
   }
-
+  GPUMemoryManager::deallocate(tmp_bottom);
+  GPUMemoryManager::deallocate(tmp_top);
   GPUMemoryManager::deallocate(tmp_weights);
   workspace.release();
-  delete [] fwd_results;
-  delete [] bwd_filter_results;
-  delete [] bwd_data_results;
 }
 
 
