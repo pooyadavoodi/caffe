@@ -34,8 +34,7 @@ class CuDNNConvolutionLayer : public ConvolutionLayer<Dtype> {
  public:
   explicit CuDNNConvolutionLayer(const LayerParameter& param)
       : ConvolutionLayer<Dtype>(param), handles_setup_(false),
-        use_algo_seeker_(true),
-        use_modest_workspace_(true) {}
+        use_algo_seeker_(true), use_modest_workspace_(true) {}
   virtual void LayerSetUp(const vector<Blob<Dtype>*>& bottom,
       const vector<Blob<Dtype>*>& top);
   virtual void Reshape(const vector<Blob<Dtype>*>& bottom,
@@ -71,11 +70,11 @@ class CuDNNConvolutionLayer : public ConvolutionLayer<Dtype> {
   bool use_algo_seeker_;
   bool use_modest_workspace_;
   void FindExConvAlgo(const vector<Blob<Dtype>*>& bottom,
-                    const vector<Blob<Dtype>*>& top,
-                    const size_t workspace_bytes);
+                      const vector<Blob<Dtype>*>& top,
+                      const size_t workspace_bytes);
   void GetConvAlgo(const vector<Blob<Dtype>*>& bottom,
-                    const vector<Blob<Dtype>*>& top,
-                    const size_t workspace_bytes);
+                   const vector<Blob<Dtype>*>& top,
+                   const size_t workspace_bytes);
 };
 #endif
 

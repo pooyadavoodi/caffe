@@ -688,11 +688,11 @@ message ConvolutionParameter {
   // ignored and the ND implementation will be used.)
   optional bool force_nd_im2col = 17 [default = false];
   enum CuDNNConvolutionAlgorithmSeeker {
-    Get    = 0;
-    FindEx = 1;
+    GET    = 0;
+    FINDEX = 1;
   }
   //Specifies which cudnn routine should be used to find the best convolution algorithm
-  optional CuDNNConvolutionAlgorithmSeeker cudnn_convolution_algo_seeker = 19 [default = FindEx];
+  optional CuDNNConvolutionAlgorithmSeeker cudnn_convolution_algo_seeker = 19 [default = FINDEX];
 }
 
 message CropParameter {
