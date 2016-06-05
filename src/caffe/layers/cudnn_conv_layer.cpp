@@ -230,23 +230,16 @@ void CuDNNConvolutionLayer<Dtype>::FindExConvAlgo(
   cudnnConvolutionBwdFilterAlgoPerf_t bwd_filter_results[kRequestAlgoCount];
   cudnnConvolutionBwdDataAlgoPerf_t   bwd_data_results[kRequestAlgoCount];
 
-  // Allocate temporary buffers for input/output of findEx.
-  void *tmp_bottom;
-  void *tmp_top;
+  // Allocate temporary buffer for weights used for backward filter FindEx
   void *tmp_weights;
-  const int tmp_bottom_size = sizeof(Dtype) * bottom_offset_;
-  const int tmp_top_size    = sizeof(Dtype) * top_offset_;
-  const int tmp_weight_size = sizeof(Dtype) * weight_offset_;
-  GPUMemoryManager::allocate(&tmp_bottom, tmp_bottom_size);
-  GPUMemoryManager::allocate(&tmp_top, tmp_top_size);
-  GPUMemoryManager::allocate(&tmp_weights, tmp_weight_size);
+  const int tmp_weights_size = sizeof(Dtype) * weight_offset_;
+  GPUMemoryManager::allocate(&tmp_weights, tmp_weights_size);
 
   // workspace_bytes is the amount of available memory before allocating
-  // temporary buffers. So, size of buffers should be subtracted from
+  // tmp_weights. So, size of tmp_weights should be subtracted from
   // workspace_bytes to represent the correct amount of available memory.
-  const int tmp_total_size = tmp_bottom_size + tmp_top_size + tmp_weight_size;
-  if (!workspace.try_reserve(workspace_bytes - tmp_total_size)) {
-    workspace.reserve(workspace_bytes - tmp_total_size);
+  if (!workspace.try_reserve(workspace_bytes - tmp_weights_size)) {
+    workspace.reserve(workspace_bytes - tmp_weights_size);
   }
 
   for (int i = 0; i < bottom.size(); i++) {
@@ -254,17 +247,17 @@ void CuDNNConvolutionLayer<Dtype>::FindExConvAlgo(
     CUDNN_CHECK(cudnnFindConvolutionForwardAlgorithmEx(
                   Caffe::cudnn_handle(),
                   bottom_descs_[i],
-                  tmp_bottom,
+                  bottom[i]->gpu_data(),
                   filter_desc_,
-                  tmp_weights,
+                  this->blobs_[0]->gpu_data(),
                   conv_descs_[i],
                   top_descs_[i],
-                  tmp_top,
+                  top[i]->mutable_gpu_data(),
                   kRequestAlgoCount,
                   &fwd_algo_count,
                   fwd_results,
                   workspace.data(),
-                  workspace_bytes));
+                  workspace.size()));
     fwd_algo_[i] = fwd_results[0].algo;
     workspace_fwd_sizes_[i] = fwd_results[0].memory;
 
@@ -272,9 +265,9 @@ void CuDNNConvolutionLayer<Dtype>::FindExConvAlgo(
     CUDNN_CHECK(cudnnFindConvolutionBackwardFilterAlgorithmEx(
                   Caffe::cudnn_handle(),
                   bottom_descs_[i],
-                  tmp_bottom,
+                  bottom[i]->gpu_data(),
                   top_descs_[i],
-                  tmp_top,
+                  top[i]->gpu_diff(),
                   conv_descs_[i],
                   filter_desc_,
                   tmp_weights,
@@ -282,7 +275,7 @@ void CuDNNConvolutionLayer<Dtype>::FindExConvAlgo(
                   &filter_algo_count,
                   bwd_filter_results,
                   workspace.data(),
-                  workspace_bytes));
+                  workspace.size()));
     bwd_filter_algo_[i] = bwd_filter_results[0].algo;
     workspace_bwd_filter_sizes_[i] = bwd_filter_results[0].memory;
 
@@ -290,23 +283,21 @@ void CuDNNConvolutionLayer<Dtype>::FindExConvAlgo(
     CUDNN_CHECK(cudnnFindConvolutionBackwardDataAlgorithmEx(
                   Caffe::cudnn_handle(),
                   filter_desc_,
-                  tmp_weights,
+                  this->blobs_[0]->gpu_data(),
                   top_descs_[i],
-                  tmp_top,
+                  top[i]->gpu_diff(),
                   conv_descs_[i],
                   bottom_descs_[i],
-                  tmp_bottom,
+                  bottom[i]->mutable_gpu_diff(),
                   kRequestAlgoCount,
                   &data_algo_count,
                   bwd_data_results,
                   workspace.data(),
-                  workspace_bytes));
+                  workspace.size()));
 
     bwd_data_algo_[i] = bwd_data_results[0].algo;
     workspace_bwd_data_sizes_[i] = bwd_data_results[0].memory;
   }
-  GPUMemoryManager::deallocate(tmp_bottom);
-  GPUMemoryManager::deallocate(tmp_top);
   GPUMemoryManager::deallocate(tmp_weights);
   workspace.release();
 }
