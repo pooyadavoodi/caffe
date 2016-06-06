@@ -75,6 +75,14 @@ class CuDNNConvolutionLayer : public ConvolutionLayer<Dtype> {
   void GetConvAlgo(const vector<Blob<Dtype>*>& bottom,
                    const vector<Blob<Dtype>*>& top,
                    const size_t workspace_bytes);
+
+  vector<cudnnTensorDescriptor_t>      cached_bottom_descs_;
+  vector<cudnnConvolutionDescriptor_t> cached_conv_descs_;
+  bool IsBottomDescChanged(const vector<Blob<Dtype>*>& bottom);
+  bool IsConvDescChanged(const vector<Blob<Dtype>*>& bottom);
+
+  bool use_reshape_;
+  bool initialized_cached_descs_;
 };
 #endif
 

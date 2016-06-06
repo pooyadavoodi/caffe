@@ -58,12 +58,22 @@ void CuDNNConvolutionLayer<Dtype>::LayerSetUp(
     cudnnTensorDescriptor_t bottom_desc;
     cudnn::createTensor4dDesc<Dtype>(&bottom_desc);
     bottom_descs_.push_back(bottom_desc);
+
     cudnnTensorDescriptor_t top_desc;
     cudnn::createTensor4dDesc<Dtype>(&top_desc);
     top_descs_.push_back(top_desc);
+
     cudnnConvolutionDescriptor_t conv_desc;
     cudnn::createConvolutionDesc<Dtype>(&conv_desc);
     conv_descs_.push_back(conv_desc);
+
+    cudnnTensorDescriptor_t cached_bottom_desc;
+    cudnn::createTensor4dDesc<Dtype>(&cached_bottom_desc);
+    cached_bottom_descs_.push_back(cached_bottom_desc);
+
+    cudnnConvolutionDescriptor_t cached_conv_desc;
+    cudnn::createConvolutionDesc<Dtype>(&cached_conv_desc);
+    cached_conv_descs_.push_back(cached_conv_desc);
   }
 
   // Tensor descriptor for bias.
@@ -72,21 +82,51 @@ void CuDNNConvolutionLayer<Dtype>::LayerSetUp(
   }
 
   handles_setup_ = true;
-  // When true, Reshape asks cuDNN for the best algorithm
-  use_algo_seeker_      = true;
+  // When true, Reshape asks cuDNN (either Get ot FindEx) for the best algorithm
+  use_algo_seeker_ = true;
   // When true, a small amount of workspace is allowed for algorithms
   use_modest_workspace_ = true;
+  // When true, Reshape sets descriptors, algorithms, workspaces.
+  use_reshape_ = true;
+  // When true, cached bottom and conv descriptors need to be set.
+  initialized_cached_descs_ = false;
 }
 
-// TODO: Set algorithms again in case parameters (blob shapes) change.
 template <typename Dtype>
 void CuDNNConvolutionLayer<Dtype>::Reshape(
     const vector<Blob<Dtype>*>& bottom, const vector<Blob<Dtype>*>& top) {
+  // Check whether cached descriptors have been initialized.
+  if (initialized_cached_descs_) {
+    // Check whether bottom and conv descriptors have changed,
+    // which then requires a new reshape and set algo.
+    if ((IsBottomDescChanged(bottom)) ||
+        (IsConvDescChanged(bottom))) {
+      use_reshape_ = true;
+      // When reshape, algorithms need to be set again.
+      use_algo_seeker_ = true;
+      use_modest_workspace_ = true;
+    } else {
+      // When no reshape is needed, setting algo may be still needed
+      // (for example, if we are at iteration 1).
+      // If we want to set algos, we have to use reshape in
+      // current implementation.
+      use_reshape_ = use_algo_seeker_;
+    }
+  } else {
+    // If cached descriptors are not initialized yet, need to
+    // do reshape which also initializes cached descriptors.
+    use_reshape_ = true;
+  }
+  if (!use_reshape_) {
+    return;
+  }
+
   ConvolutionLayer<Dtype>::Reshape(bottom, top);
   CHECK_EQ(2, this->num_spatial_axes_)
       << "CuDNNConvolution input must have 2 spatial axes "
       << "(e.g., height and width). "
       << "Use 'engine: CAFFE' for general ND convolution.";
+
   bottom_offset_ = this->bottom_dim_ / this->group_;
   top_offset_ = this->top_dim_ / this->group_;
   const int height = bottom[0]->shape(this->channel_axis_ + 1);
@@ -114,7 +154,17 @@ void CuDNNConvolutionLayer<Dtype>::Reshape(
         this->out_spatial_dim_, width_out, 1);
     cudnn::setConvolutionDesc<Dtype>(&conv_descs_[i], bottom_descs_[i],
         filter_desc_, pad_h, pad_w, stride_h, stride_w);
+    // Set cached descriptors
+    cudnn::setTensor4dDesc<Dtype>(&cached_bottom_descs_[i],
+        this->num_,
+        this->channels_ / this->group_, height, width,
+        this->channels_ * height * width,
+        height * width, width, 1);
+    cudnn::setConvolutionDesc<Dtype>(&cached_conv_descs_[i],
+        cached_bottom_descs_[i],
+        filter_desc_, pad_h, pad_w, stride_h, stride_w);
   }
+  initialized_cached_descs_ = true;
 
   // Ask cuDNN to find the best algorithm
   if (use_algo_seeker_) {
@@ -156,12 +206,8 @@ void CuDNNConvolutionLayer<Dtype>::Reshape(
   // At this point, the algorithms and their workspace are set.
   // Still need to query cuDNN for workspace size to check whether the
   // selected algorithms are valid because:
-  // 1) FindEx may return success while giving no valid algorithm as there
-  //    may be no algorithm available for given parameters.
-  // 2) Algorithms are set in the first 2 iterations, and if parameters
-  //    change afterwards, validity of selected algorithms should be checked
-  //    (TODO: Ideally, we should ask cuDNN again for best algorithm if
-  //     shape of blobs change).
+  // FindEx may return success while giving no valid algorithm as there
+  // may be no algorithm available for given parameters.
   for (int i = 0; i < bottom.size(); i++) {
     // forward algorithm
     CUDNN_CHECK(cudnnGetConvolutionForwardWorkspaceSize(Caffe::cudnn_handle(),
@@ -302,7 +348,96 @@ void CuDNNConvolutionLayer<Dtype>::FindExConvAlgo(
   workspace.release();
 }
 
+// Checked if there is a difference between the corresponding descriptors in
+// cached_bottom_descs_ and bottom_descs_.
+// No need to compare all parameters: batchsize, height, and width are enough.
+template <typename Dtype>
+bool CuDNNConvolutionLayer<Dtype>::IsBottomDescChanged(
+  const vector<Blob<Dtype>*>& bottom) {
+  int cached_n; int cached_c; int cached_h; int cached_w;
+  int cached_stride_n; int cached_stride_c;
+  int cached_stride_h; int cached_stride_w;
+  int n; int c; int h; int w;
+  int stride_n; int stride_c;
+  int stride_h; int stride_w;
+  cudnnDataType_t type;
 
+  for (int i = 0; i < bottom.size(); i++) {
+    CUDNN_CHECK(cudnnGetTensor4dDescriptor(
+      cached_bottom_descs_[i],
+      &type,
+      &cached_n, &cached_c, &cached_h, &cached_w,
+      &cached_stride_n, &cached_stride_c,
+      &cached_stride_h, &cached_stride_w));
+    CUDNN_CHECK(cudnnGetTensor4dDescriptor(
+      cached_bottom_descs_[i],
+      &type,
+      &n, &c, &h, &w,
+      &stride_n, &stride_c,
+      &stride_h, &stride_w));
+
+    if ((cached_n != n) ||
+        (cached_c != c) ||
+        (cached_h != h) ||
+        (cached_w != w) ||
+        (cached_stride_n != stride_n) ||
+        (cached_stride_c != stride_c) ||
+        (cached_stride_h != stride_h) ||
+        (cached_stride_w != stride_w)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+
+// Checked if there is a difference between the corresponding descriptors in
+// cached_conv_descs_ and conv_descs_.
+// No need to compare all parameters; pads, strides, and upscales are enough.
+template <typename Dtype>
+bool CuDNNConvolutionLayer<Dtype>::IsConvDescChanged(
+  const vector<Blob<Dtype>*>& bottom) {
+  int cached_padA[2];
+  int padA[2];
+  int cached_strideA[2];
+  int strideA[2];
+  int cached_upscaleA[2];
+  int upscaleA[2];
+  int arrayLength;
+  cudnnConvolutionMode_t mode;
+  cudnnDataType_t type;
+
+  for (int i = 0; i < bottom.size(); i++) {
+    CUDNN_CHECK(cudnnGetConvolutionNdDescriptor(
+      cached_conv_descs_[i],
+      2,
+      &arrayLength,
+      cached_padA,
+      cached_strideA,
+      cached_upscaleA,
+      &mode,
+      &type));
+    CUDNN_CHECK(cudnnGetConvolutionNdDescriptor(
+      conv_descs_[i],
+      2,
+      &arrayLength,
+      padA,
+      strideA,
+      upscaleA,
+      &mode,
+      &type));
+
+    if ((cached_padA[0] != padA[0]) ||
+        (cached_padA[1] != padA[1]) ||
+        (cached_strideA[0]  != strideA[0])  ||
+        (cached_strideA[1]  != strideA[1])  ||
+        (cached_upscaleA[0] != upscaleA[0]) ||
+        (cached_upscaleA[1] != upscaleA[1])) {
+      return true;
+    }
+  }
+  return false;
+}
 
 template <typename Dtype>
 CuDNNConvolutionLayer<Dtype>::~CuDNNConvolutionLayer() {
@@ -310,14 +445,16 @@ CuDNNConvolutionLayer<Dtype>::~CuDNNConvolutionLayer() {
   if (!handles_setup_) { return; }
 
   for (int i = 0; i < bottom_descs_.size(); i++) {
-    cudnnDestroyTensorDescriptor(bottom_descs_[i]);
-    cudnnDestroyTensorDescriptor(top_descs_[i]);
-    cudnnDestroyConvolutionDescriptor(conv_descs_[i]);
+    CUDNN_CHECK(cudnnDestroyTensorDescriptor(bottom_descs_[i]));
+    CUDNN_CHECK(cudnnDestroyTensorDescriptor(top_descs_[i]));
+    CUDNN_CHECK(cudnnDestroyConvolutionDescriptor(conv_descs_[i]));
+    CUDNN_CHECK(cudnnDestroyTensorDescriptor(cached_bottom_descs_[i]));
+    CUDNN_CHECK(cudnnDestroyConvolutionDescriptor(cached_conv_descs_[i]));
   }
   if (this->bias_term_) {
-    cudnnDestroyTensorDescriptor(bias_desc_);
+    CUDNN_CHECK(cudnnDestroyTensorDescriptor(bias_desc_));
   }
-  cudnnDestroyFilterDescriptor(filter_desc_);
+  CUDNN_CHECK(cudnnDestroyFilterDescriptor(filter_desc_));
 
   delete [] fwd_algo_;
   delete [] bwd_filter_algo_;
