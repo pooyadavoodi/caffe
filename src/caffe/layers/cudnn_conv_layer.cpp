@@ -279,9 +279,7 @@ void CuDNNConvolutionLayer<Dtype>::FindExConvAlgo(
   // Allocate temporary buffer for weights used for backward filter FindEx
   void *tmp_weights;
   const int tmp_weights_size = sizeof(Dtype) * weight_offset_;
-  if (!GPUMemory::try_allocate(&tmp_weights, tmp_weights_size)) {
-      GPUMemory::allocate(&tmp_weights, tmp_weights_size);
-  }
+  GPUMemory::allocate(&tmp_weights, tmp_weights_size);
 
   // workspace_bytes is the amount of available memory before allocating
   // tmp_weights. So, size of tmp_weights should be subtracted from
