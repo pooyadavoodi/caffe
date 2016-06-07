@@ -239,18 +239,18 @@ void CuDNNConvolutionLayer<Dtype>::GetConvAlgo(
     const size_t workspace_bytes) {
 
   for (int i = 0; i < bottom.size(); i++) {
-    // Get forward and backward algorithms
+    // Get forward algorithm
     CUDNN_CHECK(cudnnGetConvolutionForwardAlgorithm(Caffe::cudnn_handle(),
         bottom_descs_[i], filter_desc_, conv_descs_[i], top_descs_[i],
         CUDNN_CONVOLUTION_FWD_SPECIFY_WORKSPACE_LIMIT,
         workspace_bytes, &fwd_algo_[i]));
-    // Get backward algorithm for filter
+    // Get backward filter algorithm
     CUDNN_CHECK(cudnnGetConvolutionBackwardFilterAlgorithm(
         Caffe::cudnn_handle(),
         bottom_descs_[i], top_descs_[i], conv_descs_[i], filter_desc_,
         CUDNN_CONVOLUTION_BWD_FILTER_SPECIFY_WORKSPACE_LIMIT,
         workspace_bytes, &bwd_filter_algo_[i]));
-    // Get backward algorithm for data
+    // Get backward data algorithm
     CUDNN_CHECK(cudnnGetConvolutionBackwardDataAlgorithm(
         Caffe::cudnn_handle(),
         filter_desc_, top_descs_[i], conv_descs_[i], bottom_descs_[i],
@@ -279,7 +279,9 @@ void CuDNNConvolutionLayer<Dtype>::FindExConvAlgo(
   // Allocate temporary buffer for weights used for backward filter FindEx
   void *tmp_weights;
   const int tmp_weights_size = sizeof(Dtype) * weight_offset_;
-  GPUMemoryManager::allocate(&tmp_weights, tmp_weights_size);
+  if (!GPUMemoryManager::try_allocate(&tmp_weights, tmp_weights_size)) {
+      GPUMemoryManager::allocate(&tmp_weights, tmp_weights_size);
+  }
 
   // workspace_bytes is the amount of available memory before allocating
   // tmp_weights. So, size of tmp_weights should be subtracted from
