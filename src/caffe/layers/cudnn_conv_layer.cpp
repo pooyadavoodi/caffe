@@ -370,7 +370,7 @@ bool CuDNNConvolutionLayer<Dtype>::IsBottomDescChanged(
       &cached_stride_n, &cached_stride_c,
       &cached_stride_h, &cached_stride_w));
     CUDNN_CHECK(cudnnGetTensor4dDescriptor(
-      cached_bottom_descs_[i],
+      bottom_descs_[i],
       &type,
       &n, &c, &h, &w,
       &stride_n, &stride_c,
